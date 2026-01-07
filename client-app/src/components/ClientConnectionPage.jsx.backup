@@ -17,8 +17,7 @@ import {
   Monitor,
   Keyboard,
   Cctv,
-  Power,
-  Copy
+  Power
 } from 'lucide-react';
 
 function ClientConnectionPage() {
@@ -48,10 +47,226 @@ function ClientConnectionPage() {
     }
   }, [launched, navigate]);
 
+  useEffect(() => {
+    testServerConnection();
+    startHeartbeat();
+    checkLaunchStatus(); // Check if system has been launched
+    
+    // Start uptime timer
+    const uptimeInterval = setInterval(() => {
+      const uptimeMs = Date.now() - startTimeRef.current;
+      const hours = Math.floor(uptimeMs / 3600000).toString().padStart(2, '0');
+      const minutes = Math.floor((uptimeMs % 3600000) / 60000).toString().padStart(2, '0');
+      const seconds = Math.floor((uptimeMs % 60000) / 1000).toString().padStart(2, '0');
+      setConnectionStats(prev => ({
+        ...prev,
+        uptime: `${hours}:${minutes}:${seconds}`
+      }));
+    }, 1000);
+
+    // Check launch status periodically
+    const launchCheckInterval = setInterval(() => {
+      checkLaunchStatus();
+    }, 3000);
+
+    return () => {
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+      clearInterval(uptimeInterval);
+      clearInterval(launchCheckInterval);
+    };
+  }, []);
+
+  const testServerConnection = async () => {
+    try {
+      setConnectionStatus('Establishing secure connection...');
+      addDebugLog(`Connecting to: ${API_URL}/test`);
+      
+      const response = await fetch(`${API_URL}/test`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Cache-Control': 'no-cache'
+        },
+        mode: 'cors'
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setConnectionStatus('Secure connection established ✓');
+        addDebugLog(`Server handshake successful: ${JSON.stringify(data)}`);
+        return true;
+      } else {
+        setConnectionStatus(`Connection error: ${response.status}`);
+        addDebugLog(`Server response error: ${response.status}`);
+        return false;
+      }
+    } catch (error) {
+      setConnectionStatus(`Connection timeout: ${error.message}`);
+      addDebugLog(`Network error: ${error.message}`);
+      
+      // Show connection guide
+      setTimeout(() => {
+        alert(`⚠️ Server Connection Required\n\nTo connect this gaming system:\n\n1. Ensure the admin server is running\n2. Server URL: ${API_URL}\n3. Run command: cd backend && npm start\n4. Verify port 5000 is available\n\nCurrent IP: ${systemIp}`);
+      }, 1000);
+      
+      return false;
+    }
+  };
+
+  const startHeartbeat = () => {
+    sendHeartbeat();
+    
+    if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+    heartbeatRef.current = setInterval(() => {
+      sendHeartbeat();
+    }, 1000);
+    
+    addDebugLog('Heartbeat monitoring initiated (1s interval)');
+  };
+
+  const sendHeartbeat = async () => {
+    try {
+      const startTime = Date.now();
+      const ip = systemIp;
+      
+      const response = await fetch(`${API_URL}/heartbeat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+          ip: ip,
+          timestamp: Date.now(),
+          userAgent: navigator.userAgent || 'Gaming System',
+          performance: {
+            cores: navigator.hardwareConcurrency || 8,
+            memory: '16GB',
+            gpu: 'RTX 3060'
+          }
+        })
+      });
+      
+      const ping = Date.now() - startTime;
+      
+      if (response.ok) {
+        const data = await response.json();
+        
+        if (!isConnected) {
+          setIsConnected(true);
+          setConnectionStatus('Connected to gaming network ✓');
+          addDebugLog('✓ System registered on gaming network');
+        }
+        
+        setLastUpdate(new Date().toLocaleTimeString());
+        
+        // Update connection stats
+        setConnectionStats(prev => ({
+          ...prev,
+          heartbeatsSent: prev.heartbeatsSent + 1,
+          lastHeartbeatTime: new Date().toLocaleTimeString(),
+          averagePing: Math.round((prev.averagePing * prev.heartbeatsSent + ping) / (prev.heartbeatsSent + 1))
+        }));
+        
+        if (data.hasName && data.assignedName !== assignedName) {
+          setAssignedName(data.assignedName);
+          addDebugLog(`System name updated: "${data.assignedName}"`);
+        }
+      } else {
+        if (isConnected) {
+          setIsConnected(false);
+          setConnectionStatus(`Connection disrupted: ${response.status}`);
+          addDebugLog(`✗ Network disruption detected`);
+        }
+      }
+    } catch (error) {
+      if (isConnected) {
+        setIsConnected(false);
+        setConnectionStatus('Network connection lost');
+        addDebugLog(`✗ Connection timeout`);
+      }
+      
+      // Attempt reconnection
+      setTimeout(() => {
+        sendHeartbeat();
+      }, 2000);
+    }
+  };
+
+  const manualHeartbeat = () => {
+    sendHeartbeat();
+  };
+
+  const checkNameStatus = async () => {
+    try {
+      const response = await fetch(`${API_URL}/client/check/${systemIp}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.exists && data.name) {
+          setAssignedName(data.name);
+          addDebugLog(`Name verified: "${data.name}"`);
+        }
+      }
+    } catch (error) {
+      addDebugLog('Error checking system name');
+    }
+  };
+
   const copyIpToClipboard = () => {
     navigator.clipboard.writeText(systemIp)
-      .then(() => alert('IP address copied to clipboard!'))
-      .catch(() => alert('Failed to copy IP address'));
+      .then(() => addDebugLog('System IP copied to clipboard'))
+      .catch(() => addDebugLog('Copy operation failed'));
+  };
+
+  const addDebugLog = (message) => {
+    const time = new Date().toLocaleTimeString();
+    setDebugLog(prev => [`[${time}] ${message}`, ...prev.slice(0, 19)]);
+  };
+
+  const restartConnection = () => {
+    if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+    setIsConnected(false);
+    setConnectionStatus('Reinitializing connection...');
+    addDebugLog('Connection restart initiated');
+    testServerConnection();
+    startHeartbeat();
+  };
+
+  const checkLaunchStatus = async () => {
+    try {
+      const response = await fetch(`${API_URL}/systems/launch-status/${systemIp}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.launched && !launched) {
+          setLaunched(true);
+          setLaunchConfig(data.config);
+          addDebugLog('🚀 System launched! Redirecting to login...');
+          
+          // Acknowledge the launch
+          await fetch(`${API_URL}/systems/launch-acknowledge/${systemIp}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          
+          // Navigate to login page with system data
+          navigate('/login', { 
+            state: { 
+              systemName: data.config?.systemName || assignedName || systemIp,
+              systemIp: systemIp,
+              launchConfig: data.config,
+              connectionStats: connectionStats
+            }
+          });
+        }
+      }
+    } catch (error) {
+      // Silently fail - launch status check is not critical
+    }
+  };
+
+  const handleCustomerLogin = (customerInfo) => {
+    setCustomerData(customerInfo);
+    addDebugLog(`Customer logged in: ${customerInfo.name}`);
   };
 
   return (
@@ -74,7 +289,7 @@ function ClientConnectionPage() {
             <div className="hidden md:flex items-center space-x-3">
               <div className="px-4 py-2 bg-gray-800 rounded-lg border border-gray-700">
                 <div className="text-sm text-gray-400">Server</div>
-                <div className="font-mono text-sm">{API_URL.replace('http://', '')}</div>
+                <div className="font-mono text-sm">{SERVER_IP}:5000</div>
               </div>
             </div>
           </div>

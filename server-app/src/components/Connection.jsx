@@ -18,8 +18,10 @@ import {
   Zap,
   Shield,
   Activity,
-  Clock
+  Clock,
+  Settings
 } from 'lucide-react';
+import SystemConfig from './SystemConfig';
 
 const API_URL = 'http://localhost:5000/api';
 
@@ -31,6 +33,7 @@ function ConnectionPage() {
   const [serverInfo, setServerInfo] = useState(null);
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [configSystem, setConfigSystem] = useState(null);
 
   useEffect(() => {
     fetchServerInfo();
@@ -188,6 +191,16 @@ function ConnectionPage() {
       </div>
     );
   };
+
+  // If configSystem is set, show configuration page
+  if (configSystem) {
+    return (
+      <SystemConfig 
+        system={configSystem} 
+        onBack={() => setConfigSystem(null)} 
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-950 text-gray-100 p-4 md:p-6">
@@ -440,6 +453,18 @@ function ConnectionPage() {
                             </span>
                           </div>
                           <div className="flex space-x-2">
+                            <button
+                              onClick={() => setConfigSystem(system)}
+                              disabled={!system.isActive}
+                              className={`px-3 py-1 rounded-lg flex items-center space-x-1 transition-colors ${
+                                system.isActive
+                                  ? 'bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30'
+                                  : 'bg-gray-700/50 text-gray-500 cursor-not-allowed'
+                              }`}
+                            >
+                              <Settings size={14} />
+                              <span className="text-sm">Configure</span>
+                            </button>
                             <button
                               onClick={() => {
                                 setIpInput(system.ip);

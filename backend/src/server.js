@@ -246,6 +246,101 @@ app.delete('/api/systems/:ip', (req, res) => {
   }
 });
 
+// Launch system with selected software
+app.post('/api/systems/launch', (req, res) => {
+  const { ip, software, systemName } = req.body;
+  
+  if (!ip || !ip.trim()) {
+    return res.status(400).json({
+      success: false,
+      error: 'IP address is required'
+    });
+  }
+  
+  const trimmedIp = ip.trim();
+  
+  if (!systems.has(trimmedIp)) {
+    return res.status(404).json({
+      success: false,
+      error: `System ${trimmedIp} not found`
+    });
+  }
+  
+  const system = systems.get(trimmedIp);
+  
+  // Store launch configuration
+  system.launchConfig = {
+    software: software || [],
+    launchedAt: Date.now(),
+    systemName: systemName || system.name || trimmedIp,
+    launched: true
+  };
+  
+  console.log(`🚀 Launch command sent to ${trimmedIp}: ${software?.join(', ')}`);
+  
+  res.json({
+    success: true,
+    ip: trimmedIp,
+    message: `Launch command sent to ${systemName || trimmedIp}`,
+    software: software,
+    timestamp: Date.now()
+  });
+});
+
+// Check launch status for client
+app.get('/api/systems/launch-status/:ip', (req, res) => {
+  const ip = req.params.ip;
+  
+  if (systems.has(ip)) {
+    const system = systems.get(ip);
+    
+    if (system.launchConfig && system.launchConfig.launched) {
+      res.json({
+        success: true,
+        launched: true,
+        config: system.launchConfig
+      });
+    } else {
+      res.json({
+        success: true,
+        launched: false,
+        message: 'System not launched yet'
+      });
+    }
+  } else {
+    res.status(404).json({
+      success: false,
+      error: `System ${ip} not found`
+    });
+  }
+});
+
+// Acknowledge launch (client confirms it received the launch command)
+app.post('/api/systems/launch-acknowledge/:ip', (req, res) => {
+  const ip = req.params.ip;
+  
+  if (systems.has(ip)) {
+    const system = systems.get(ip);
+    
+    if (system.launchConfig) {
+      system.launchConfig.acknowledged = true;
+      system.launchConfig.acknowledgedAt = Date.now();
+    }
+    
+    console.log(`✅ Launch acknowledged by ${ip}`);
+    
+    res.json({
+      success: true,
+      message: 'Launch acknowledged'
+    });
+  } else {
+    res.status(404).json({
+      success: false,
+      error: `System ${ip} not found`
+    });
+  }
+});
+
 // ========== DEBUG & INFO ENDPOINTS ==========
 
 // Server info endpoint
